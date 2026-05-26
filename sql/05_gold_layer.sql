@@ -22,10 +22,10 @@ WITH note_agg AS (
     SELECT
         CLAIM_ID,
         COUNT(*) AS TOTAL_NOTES,
-        ROUND(AVG(CASE LOWER(NOTE_SENTIMENT)
-            WHEN 'positive' THEN  1.0
-            WHEN 'neutral'  THEN  0.0
-            WHEN 'negative' THEN -1.0
+        ROUND(AVG(CASE SENTIMENT_CATEGORY
+            WHEN 'POSITIVE' THEN  1.0
+            WHEN 'NEUTRAL'  THEN  0.0
+            WHEN 'NEGATIVE' THEN -1.0
             ELSE 0.0
         END), 3) AS AVG_NOTE_SENTIMENT,
         SUM(CASE WHEN SENTIMENT_CATEGORY = 'NEGATIVE' THEN 1 ELSE 0 END) AS NEGATIVE_NOTE_COUNT,

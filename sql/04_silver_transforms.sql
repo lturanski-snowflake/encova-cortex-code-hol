@@ -4,16 +4,14 @@
     
     Pattern: Bronze → Dynamic Tables with AI enrichment → Silver
     
-    Only 2 AI functions per table (AI_CLASSIFY + AI_EXTRACT):
-    - AI_CLASSIFY   — classify claims by complexity, notes by sentiment
-    - AI_EXTRACT    — extract multiple structured fields in one call
-    
-    CTE pattern used to avoid duplicate AI calls (each call = $$$).
+    ONE AI function call on CLAIMS_SILVER only (AI_EXTRACT).
+    CLAIM_NOTES_SILVER has no AI calls — just a clean pass-through.
+    This keeps refresh under 2-3 minutes for 5K rows.
 */
 
 --------------------------------------------------------------------
 -- Silver Layer: Enriched Claims with AI-Derived Features
--- 5K rows × 2 AI calls = 10K LLM inferences (~2-3 min)
+-- 5K rows × 1 AI call (AI_EXTRACT) = 5K LLM inferences (~1-2 min)
 --------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CLAIMS_SILVER
     WAREHOUSE = ENCOVA_TRAINING_WH
@@ -64,27 +62,22 @@ WITH base AS (
             WHEN c.ESTIMATED_AMOUNT > p.COVERAGE_LIMIT THEN TRUE
             ELSE FALSE
         END AS EXCEEDS_COVERAGE,
-        -- AI call 1: Classify complexity
-        AI_CLASSIFY(
-            c.LOSS_DESCRIPTION,
-            ['Simple - straightforward damage claim', 
-             'Moderate - requires investigation', 
-             'Complex - multiple parties or litigation potential']
-        ):labels[0]::VARCHAR AS AI_COMPLEXITY_CLASS,
-        -- AI call 2: Extract damage type + sentiment in a single call
+        -- Single AI call: extract damage type, sentiment, and complexity
         AI_EXTRACT(
             c.LOSS_DESCRIPTION,
             {'damage_type': 'What is the primary type of damage or injury?',
-             'sentiment': 'Is the overall tone positive, negative, or neutral?'}
+             'sentiment': 'Is the overall tone positive, negative, or neutral? Reply with one word.',
+             'complexity': 'Is this claim simple, moderate, or complex? Reply with one word.'}
         ) AS _extracted
     FROM BRONZE.CLAIMS_RAW c
     LEFT JOIN BRONZE.POLICIES p ON c.POLICY_ID = p.POLICY_ID
     LEFT JOIN BRONZE.CLAIMANTS cl ON c.CLAIMANT_ID = cl.CLAIMANT_ID
 )
 SELECT
-    *,
+    * EXCLUDE (_extracted),
     _extracted:response:damage_type::VARCHAR AS AI_EXTRACTED_DAMAGE_TYPE,
     _extracted:response:sentiment::VARCHAR AS DESCRIPTION_SENTIMENT,
+    _extracted:response:complexity::VARCHAR AS AI_COMPLEXITY_CLASS,
     CURRENT_TIMESTAMP() AS SILVER_LOADED_AT
 FROM base;
 
@@ -92,43 +85,33 @@ FROM base;
 ALTER DYNAMIC TABLE SILVER.CLAIMS_SILVER REFRESH;
 
 --------------------------------------------------------------------
--- Silver Layer: AI-Enriched Claim Notes
--- 3K rows × 2 AI calls = 6K LLM inferences (~1-2 min)
--- CTE avoids calling each AI function twice
+-- Silver Layer: Claim Notes (no AI — simple pass-through)
+-- Fast: no LLM calls, just reshaping
 --------------------------------------------------------------------
 CREATE OR REPLACE DYNAMIC TABLE CLAIM_NOTES_SILVER
     WAREHOUSE = ENCOVA_TRAINING_WH
     TARGET_LAG = '5 minutes'
-    COMMENT = 'Silver layer: claim notes with sentiment classification and action extraction'
+    COMMENT = 'Silver layer: claim notes with derived sentiment from keywords'
 AS
-WITH ai_enriched AS (
-    SELECT
-        n.NOTE_ID,
-        n.CLAIM_ID,
-        n.NOTE_DATE,
-        n.NOTE_AUTHOR,
-        n.NOTE_TYPE,
-        n.NOTE_TEXT,
-        AI_CLASSIFY(n.NOTE_TEXT, ['Positive', 'Negative', 'Neutral']):labels[0]::VARCHAR AS _sentiment,
-        AI_EXTRACT(n.NOTE_TEXT, {'action': 'What action or next step is recommended?'}):response:action::VARCHAR AS _action
-    FROM BRONZE.CLAIM_NOTES n
-)
 SELECT
-    NOTE_ID,
-    CLAIM_ID,
-    NOTE_DATE,
-    NOTE_AUTHOR,
-    NOTE_TYPE,
-    NOTE_TEXT,
-    _sentiment AS NOTE_SENTIMENT,
-    CASE _sentiment
-        WHEN 'Negative' THEN 'NEGATIVE'
-        WHEN 'Positive' THEN 'POSITIVE'
+    n.NOTE_ID,
+    n.CLAIM_ID,
+    n.NOTE_DATE,
+    n.NOTE_AUTHOR,
+    n.NOTE_TYPE,
+    n.NOTE_TEXT,
+    -- Simple keyword-based sentiment (no AI call — instant)
+    CASE 
+        WHEN LOWER(n.NOTE_TEXT) LIKE '%suspicious%' OR LOWER(n.NOTE_TEXT) LIKE '%denied%' 
+             OR LOWER(n.NOTE_TEXT) LIKE '%frustrated%' OR LOWER(n.NOTE_TEXT) LIKE '%fraud%' 
+        THEN 'NEGATIVE'
+        WHEN LOWER(n.NOTE_TEXT) LIKE '%approved%' OR LOWER(n.NOTE_TEXT) LIKE '%satisfact%' 
+             OR LOWER(n.NOTE_TEXT) LIKE '%completed%' OR LOWER(n.NOTE_TEXT) LIKE '%resolved%' 
+        THEN 'POSITIVE'
         ELSE 'NEUTRAL'
     END AS SENTIMENT_CATEGORY,
-    _action AS AI_EXTRACTED_ACTION,
     CURRENT_TIMESTAMP() AS SILVER_LOADED_AT
-FROM ai_enriched;
+FROM BRONZE.CLAIM_NOTES n;
 
 -- Manual refresh after creation
 ALTER DYNAMIC TABLE SILVER.CLAIM_NOTES_SILVER REFRESH;
