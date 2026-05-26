@@ -22,7 +22,7 @@ WITH note_agg AS (
     SELECT
         CLAIM_ID,
         COUNT(*) AS TOTAL_NOTES,
-        ROUND(AVG(CASE NOTE_SENTIMENT
+        ROUND(AVG(CASE LOWER(NOTE_SENTIMENT)
             WHEN 'positive' THEN  1.0
             WHEN 'neutral'  THEN  0.0
             WHEN 'negative' THEN -1.0
@@ -134,7 +134,7 @@ SELECT
     SUM(CASE WHEN WEATHER_RELATED = TRUE THEN 1 ELSE 0 END) AS WEATHER_CLAIMS,
     
     -- AI metrics (map string sentiment to numeric for averaging)
-    ROUND(AVG(CASE DESCRIPTION_SENTIMENT
+    ROUND(AVG(CASE LOWER(DESCRIPTION_SENTIMENT)
         WHEN 'positive' THEN  1.0
         WHEN 'neutral'  THEN  0.0
         WHEN 'negative' THEN -1.0

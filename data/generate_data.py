@@ -146,7 +146,7 @@ with open(os.path.join(DATA_DIR, 'claims_raw.csv'), 'w', newline='') as f:
                 'PAID_AMOUNT', 'RESERVED_AMOUNT', 'ADJUSTER_ID', 'FRAUD_INDICATOR',
                 'SEVERITY', 'CAUSE_OF_LOSS', 'WEATHER_RELATED', 'LITIGATION_FLAG', 'CREATED_AT'])
     statuses = ['OPEN', 'UNDER_INVESTIGATION', 'APPROVED', 'PAID', 'CLOSED', 'DENIED']
-    for i in range(10000):  # Reduced from 50K — 10K × 3 AI functions = 30K LLM calls (1/5 the cost)
+    for i in range(5000):  # 5K claims × 2 AI functions = 10K LLM calls (~2-3 min refresh)
         dol = datetime.now() - timedelta(days=random.randint(1, 365))
         dor = dol + timedelta(days=random.randint(0, 14))
         fraud = random.choices(['NONE', 'SUSPICIOUS', 'CONFIRMED'], weights=[89, 8, 3])[0]
@@ -200,10 +200,10 @@ with open(os.path.join(DATA_DIR, 'claim_notes.csv'), 'w', newline='') as f:
     w = csv.writer(f)
     w.writerow(['NOTE_ID', 'CLAIM_ID', 'NOTE_DATE', 'NOTE_AUTHOR', 'NOTE_TYPE',
                 'NOTE_TEXT', 'CREATED_AT'])
-    for i in range(6000):  # ~0.6 notes per claim on average
+    for i in range(3000):  # ~0.6 notes per claim; 3K × 2 AI functions = 6K LLM calls
         w.writerow([
             f'NOTE-{i:07d}',
-            f'CL-{random.randint(0,9999):07d}',
+            f'CL-{random.randint(0,4999):07d}',
             rand_ts(365),
             f'Adjuster_{random.randint(1,50)}',
             random.choice(NOTE_TYPES),
